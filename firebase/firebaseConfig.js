@@ -5,7 +5,7 @@ import {
   initializeAuth,
   getReactNativePersistence,
 } from "firebase/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
 import { getFirestore } from "firebase/firestore";
 
 // YOUR FIREBASE CREDENTIALS
@@ -23,7 +23,7 @@ const app = initializeApp(firebaseConfig);
 
 // FIX warning + ADD login persistence
 export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
+  persistence: getReactNativePersistence(ReactNativeAsyncStorage),
 });
 
 // Firestore
