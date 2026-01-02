@@ -67,7 +67,7 @@ export default function Login() {
       await saveAuth(userCredential.user.uid);
 
       // Redirect to home
-      router.replace("/home");
+      router.replace("/tabs/home");
     } catch (err: any) {
       console.log("Login error:", err.code);
 

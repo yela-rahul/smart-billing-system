@@ -15,7 +15,7 @@ export default function Index() {
 
       // ✅ BOTH must be true
       if (localLoggedIn && firebaseUser) {
-        router.replace("/home");
+        router.replace("/tabs/home");
       } else {
         // ❌ Any mismatch → force logout
         await clearAuth();
