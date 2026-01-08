@@ -1,159 +1,304 @@
-// app/home.tsx (Updated)
-import React, { useEffect, useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
-  StatusBar,
+  TouchableOpacity,
+  SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
+  Dimensions,
+  StatusBar
 } from "react-native";
-import { useRouter, Stack } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { db } from "../../firebase/firebaseConfig.js";
-import { doc, getDoc } from "firebase/firestore";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { useRouter, useFocusEffect } from "expo-router";
 import { getUserId } from "../../utils/authStore";
+import { db } from "../../firebase/firebaseConfig";
+import { collection, getDocs, query, orderBy, doc, getDoc } from "firebase/firestore";
 
-export default function Home() {
+const { width } = Dimensions.get("window");
+
+/* ---------------- TYPES ---------------- */
+type BillItem = {
+  id: string;
+  billNo: string;
+  grandTotal: number;
+  paymentMode: string;
+  date: string;
+  totalQty: number;
+};
+
+type DashboardStats = {
+  totalRevenue: number;
+  totalOrders: number;
+  itemsSold: number;
+};
+
+export default function HomeScreen() {
   const router = useRouter();
-  const [shopName, setShopName] = useState("Loading...");
-  const [today, setToday] = useState("");
-
-  const summary = { revenue: "₹0.00", orders: 0, items: 0 };
+  const [userName, setUserName] = useState("Shop Owner");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   
-  const recentBills = [
-    { id: "#124", time: "10:45 AM", amount: "₹120", mode: "Cash" },
-    { id: "#123", time: "10:30 AM", amount: "₹80", mode: "UPI" },
-    { id: "#122", time: "10:10 AM", amount: "₹150", mode: "UPI" },
-  ];
+  const [stats, setStats] = useState<DashboardStats>({
+    totalRevenue: 0,
+    totalOrders: 0,
+    itemsSold: 0,
+  });
+  const [recentBills, setRecentBills] = useState<BillItem[]>([]);
 
-  useEffect(() => { loadHeaderData(); }, []);
+  const todayDate = new Date().toLocaleDateString("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
 
-  const loadHeaderData = async () => {
+  /* ---------------- FETCH DATA ---------------- */
+  const fetchDashboardData = async () => {
     try {
-      const date = new Date();
-      setToday(date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }));
       const uid = await getUserId();
       if (!uid) return;
-      const snap = await getDoc(doc(db, "users", uid));
-      if (snap.exists()) setShopName(snap.data().shopName);
-    } catch (err) { console.log(err); }
+
+      // 1. Get Shop Name
+      const userDoc = await getDoc(doc(db, "users", uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setUserName(userData.shopName || userData.name || "Shop Owner");
+      }
+
+      // 2. Get Bills
+      const q = query(collection(db, "users", uid, "bills"), orderBy("date", "desc"));
+      const querySnapshot = await getDocs(q);
+
+      const todayString = new Date().toDateString();
+      
+      let revenue = 0;
+      let orders = 0;
+      let items = 0;
+      
+      const allBills: BillItem[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const billDate = new Date(data.date).toDateString();
+        
+        allBills.push({ id: doc.id, ...data } as BillItem);
+
+        // Calculate Today's Stats
+        if (billDate === todayString) {
+          revenue += Number(data.grandTotal || 0);
+          orders += 1;
+          items += Number(data.totalQty || 0);
+        }
+      });
+
+      // 3. Update State
+      setStats({
+        totalRevenue: revenue,
+        totalOrders: orders,
+        itemsSold: items,
+      });
+      
+      setRecentBills(allBills.slice(0, 3));
+
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchDashboardData();
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.safe, { justifyContent: "center", alignItems: "center" }]}>
+        <ActivityIndicator size="large" color="#2563EB" />
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor="#EFF6FF" />
-
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* HEADER */}
-        <View style={styles.headerSection}>
-          <View>
-            <Text style={styles.greeting}>Welcome Back,</Text>
-            <Text style={styles.shopName}>{shopName}</Text>
-            <Text style={styles.dateText}>{today}</Text>
-          </View>
-          <TouchableOpacity onPress={() => router.push("/profile")}>
-            <View style={styles.profileIconContainer}>
-                <Ionicons name="person" size={24} color="#2563EB" />
-            </View>
-          </TouchableOpacity>
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+      
+      {/* Header (Now matches background color) */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.welcomeText}>Welcome Back,</Text>
+          <Text style={styles.shopName}>{userName.toUpperCase()}</Text>
+          <Text style={styles.dateText}>{todayDate}</Text>
         </View>
+        <TouchableOpacity style={styles.profileBtn} onPress={() => router.push("/profile")}>
+          <Ionicons name="person" size={24} color="#2563EB" />
+        </TouchableOpacity>
+      </View>
 
-        {/* OVERVIEW GRID */}
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <Text style={styles.sectionTitle}>Today's Overview</Text>
-        <LinearGradient colors={["#2563EB", "#1D4ED8"]} style={styles.revenueCard}>
+
+        {/* Revenue Card */}
+        <View style={styles.revenueCard}>
           <View>
             <Text style={styles.revenueLabel}>Total Revenue</Text>
-            <Text style={styles.revenueAmount}>{summary.revenue}</Text>
+            <Text style={styles.revenueAmount}>
+              ₹{stats.totalRevenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+            </Text>
           </View>
-          <View style={styles.iconCircle}>
-             <Ionicons name="trending-up" size={24} color="#2563EB" />
+          <View style={styles.trendIcon}>
+            <Ionicons name="trending-up" size={24} color="#2563EB" />
           </View>
-        </LinearGradient>
-
-        <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-                <View style={[styles.miniIcon, { backgroundColor: "#DBEAFE" }]}>
-                    <Ionicons name="receipt" size={20} color="#2563EB" />
-                </View>
-                <Text style={styles.statValue}>{summary.orders}</Text>
-                <Text style={styles.statLabel}>Orders</Text>
-            </View>
-            <View style={styles.statCard}>
-                <View style={[styles.miniIcon, { backgroundColor: "#FEF3C7" }]}>
-                    <Ionicons name="cube" size={20} color="#D97706" />
-                </View>
-                <Text style={styles.statValue}>{summary.items}</Text>
-                <Text style={styles.statLabel}>Items Sold</Text>
-            </View>
         </View>
 
-        {/* RECENT BILLS */}
+        {/* Stats Row */}
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <View style={[styles.iconBox, { backgroundColor: "#DBEAFE" }]}>
+              <Ionicons name="receipt" size={24} color="#2563EB" />
+            </View>
+            <Text style={styles.statValue}>{stats.totalOrders}</Text>
+            <Text style={styles.statLabel}>Orders</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <View style={[styles.iconBox, { backgroundColor: "#FEF3C7" }]}>
+              <MaterialIcons name="inventory" size={24} color="#D97706" />
+            </View>
+            <Text style={styles.statValue}>{stats.itemsSold}</Text>
+            <Text style={styles.statLabel}>Items Sold</Text>
+          </View>
+        </View>
+
+        {/* Recent Bills */}
         <View style={styles.recentHeader}>
           <Text style={styles.sectionTitle}>Recent Bills</Text>
-          <TouchableOpacity>
-            <Text style={styles.viewAll}>View All</Text>
+          <TouchableOpacity onPress={() => router.push("/tabs/bills")}>
+            <Text style={styles.viewAllBtn}>View All</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.recentBox}>
-          {recentBills.map((bill, index) => (
-            <View key={index} style={[styles.billRow, index === recentBills.length - 1 && { borderBottomWidth: 0 }]}>
-              <View style={styles.billLeft}>
-                <View style={styles.billIcon}>
-                    <Ionicons name="document-text-outline" size={18} color="#64748B" />
-                </View>
-                <View>
-                    <Text style={styles.billId}>{bill.id}</Text>
-                    <Text style={styles.billTime}>{bill.time}</Text>
-                </View>
+        {recentBills.length === 0 ? (
+          <Text style={styles.noBillsText}>No orders found.</Text>
+        ) : (
+          recentBills.map((bill) => (
+            <View key={bill.id} style={styles.billCard}>
+              <View style={styles.billIcon}>
+                <Ionicons name="document-text-outline" size={24} color="#64748B" />
               </View>
-              <View style={styles.billRight}>
-                 <Text style={styles.billAmount}>{bill.amount}</Text>
-                 <Text style={[styles.billMode, bill.mode === "UPI" ? { color: "#2563EB", backgroundColor: "#EFF6FF" } : { color: "#059669", backgroundColor: "#ECFDF5" }]}>{bill.mode}</Text>
+              <View style={styles.billInfo}>
+                <Text style={styles.billNo}>Bill #{bill.billNo}</Text>
+                <Text style={styles.billTime}>
+                  {new Date(bill.date).toLocaleDateString("en-IN", {day:'2-digit', month:'short'})} 
+                  {', '}
+                  {new Date(bill.date).toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              </View>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={styles.billAmount}>₹{bill.grandTotal}</Text>
+                <View style={[styles.badge, bill.paymentMode === "Online" ? styles.badgeBlue : styles.badgeGreen]}>
+                  <Text style={[styles.badgeText, bill.paymentMode === "Online" ? styles.textBlue : styles.textGreen]}>
+                    {bill.paymentMode}
+                  </Text>
+                </View>
               </View>
             </View>
-          ))}
-        </View>
+          ))
+        )}
 
-        {/* BOTTOM SPACER (So content isn't hidden behind the new footer) */}
-        <View style={{ height: 40 }} />
+        {/* Removed the duplicate FAB here */}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ... Use the styles from the previous response ...
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#EFF6FF" },
-  scrollContent: { backgroundColor: "#F8FAFC", minHeight: "100%", paddingBottom: 20 },
-  headerSection: { backgroundColor: "#EFF6FF", paddingHorizontal: 20, paddingBottom: 20, paddingTop: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  greeting: { fontSize: 14, color: "#64748B", fontWeight: "500" },
-  shopName: { fontSize: 22, fontWeight: "800", color: "#0F172A", marginTop: 2 },
-  dateText: { fontSize: 13, color: "#2563EB", fontWeight: "600", marginTop: 4 },
-  profileIconContainer: { backgroundColor: "#FFFFFF", padding: 8, borderRadius: 50, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5 },
-  sectionTitle: { fontSize: 18, fontWeight: "700", color: "#1E293B", marginHorizontal: 20, marginTop: 24, marginBottom: 12 },
-  revenueCard: { marginHorizontal: 20, borderRadius: 20, padding: 20, flexDirection: "row", justifyContent: "space-between", alignItems: "center", elevation: 4, shadowColor: "#2563EB", shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 } },
-  revenueLabel: { color: "#BFDBFE", fontSize: 14, fontWeight: "500", marginBottom: 6 },
-  revenueAmount: { color: "#FFFFFF", fontSize: 32, fontWeight: "800" },
-  iconCircle: { backgroundColor: "#FFFFFF", width: 45, height: 45, borderRadius: 25, justifyContent: "center", alignItems: "center" },
-  statsRow: { flexDirection: "row", marginHorizontal: 20, marginTop: 16, gap: 16 },
-  statCard: { flex: 1, backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "#F1F5F9", elevation: 1 },
-  miniIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  statValue: { fontSize: 24, fontWeight: "700", color: "#0F172A" },
-  statLabel: { fontSize: 13, color: "#64748B", fontWeight: "500" },
-  recentHeader: { marginHorizontal: 20, marginTop: 24, marginBottom: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  viewAll: { fontSize: 14, color: "#2563EB", fontWeight: "600" },
-  recentBox: { backgroundColor: "#FFFFFF", marginHorizontal: 20, borderRadius: 16, borderWidth: 1, borderColor: "#F1F5F9", overflow: 'hidden' },
-  billRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 16, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: "#F1F5F9" },
-  billLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  billIcon: { backgroundColor: "#F8FAFC", padding: 8, borderRadius: 8 },
-  billId: { fontSize: 15, fontWeight: "600", color: "#0F172A" },
-  billTime: { fontSize: 12, color: "#94A3B8", marginTop: 2 },
-  billRight: { alignItems: 'flex-end', gap: 4 },
-  billAmount: { fontSize: 16, fontWeight: "700", color: "#0F172A" },
-  billMode: { fontSize: 10, fontWeight: "700", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
+  // Main background color (Uniform Light Blue-Grey)
+  safe: { flex: 1, backgroundColor: "#F8FAFC" },
+  
+  // Header matches the background now
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 24,
+    paddingBottom: 16,
+    backgroundColor: "#F8FAFC" // Changed from #fff to match body
+  },
+  
+  welcomeText: { fontSize: 16, color: "#64748B", fontWeight: "600" },
+  shopName: { fontSize: 24, fontWeight: "800", color: "#0F172A", marginTop: 4 },
+  dateText: { fontSize: 14, color: "#2563EB", fontWeight: "600", marginTop: 4 },
+  
+  profileBtn: {
+    width: 48, height: 48, borderRadius: 24, backgroundColor: "#fff", // White button on grey bg
+    justifyContent: "center", alignItems: "center", 
+    borderWidth: 1, borderColor: "#E2E8F0",
+    elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4
+  },
+  
+  scrollContent: { padding: 24, paddingTop: 8, paddingBottom: 100 },
+  sectionTitle: { fontSize: 20, fontWeight: "700", color: "#0F172A", marginBottom: 16 },
+  
+  revenueCard: {
+    backgroundColor: "#2563EB", borderRadius: 24, padding: 24, flexDirection: "row",
+    justifyContent: "space-between", alignItems: "center", marginBottom: 24,
+    shadowColor: "#2563EB", shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25, shadowRadius: 16, elevation: 8
+  },
+  revenueLabel: { color: "#BFDBFE", fontSize: 14, fontWeight: "600", marginBottom: 8 },
+  revenueAmount: { color: "#fff", fontSize: 36, fontWeight: "800" },
+  trendIcon: {
+    width: 48, height: 48, borderRadius: 24, backgroundColor: "#fff",
+    justifyContent: "center", alignItems: "center"
+  },
+  
+  statsRow: { flexDirection: "row", gap: 16, marginBottom: 32 },
+  statCard: {
+    flex: 1, backgroundColor: "#fff", padding: 20, borderRadius: 20,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8, elevation: 2
+  },
+  iconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center", marginBottom: 12 },
+  statValue: { fontSize: 24, fontWeight: "800", color: "#0F172A", marginBottom: 4 },
+  statLabel: { fontSize: 14, color: "#64748B", fontWeight: "600" },
+
+  recentHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  viewAllBtn: { fontSize: 14, fontWeight: "700", color: "#2563EB" },
+  noBillsText: { color: "#94A3B8", fontStyle: "italic" },
+  
+  billCard: {
+    flexDirection: "row", alignItems: "center", backgroundColor: "#fff",
+    padding: 16, borderRadius: 16, marginBottom: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 2
+  },
+  billIcon: {
+    width: 48, height: 48, borderRadius: 12, backgroundColor: "#F8FAFC",
+    justifyContent: "center", alignItems: "center", marginRight: 16
+  },
+  billInfo: { flex: 1 },
+  billNo: { fontSize: 16, fontWeight: "700", color: "#0F172A" },
+  billTime: { fontSize: 12, color: "#64748B", marginTop: 4 },
+  billAmount: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
+  
+  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 4 },
+  badgeBlue: { backgroundColor: "#DBEAFE" },
+  badgeGreen: { backgroundColor: "#DCFCE7" },
+  badgeText: { fontSize: 10, fontWeight: "700" },
+  textBlue: { color: "#1E40AF" },
+  textGreen: { color: "#166534" },
 });

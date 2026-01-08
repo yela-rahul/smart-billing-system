@@ -1,6 +1,6 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { TouchableOpacity, View } from "react-native";
+import { View } from "react-native";
 
 export default function TabLayout() {
   return (
@@ -14,7 +14,7 @@ export default function TabLayout() {
         },
       }}
     >
-      {/* HOME */}
+      {/* 1. HOME */}
       <Tabs.Screen
         name="home"
         options={{
@@ -25,7 +25,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* MENU */}
+      {/* 2. MENU */}
       <Tabs.Screen
         name="menu"
         options={{
@@ -36,7 +36,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* ➕ NEW BILL (CENTER FAB) */}
+      {/* 3. ➕ NEW BILL (CENTER FAB) */}
       <Tabs.Screen
         name="new-bill"
         options={{
@@ -53,6 +53,11 @@ export default function TabLayout() {
                 alignItems: "center",
                 marginBottom: 30,
                 elevation: 6,
+                // Shadow for iOS
+                shadowColor: "#2563EB",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 4,
               }}
             >
               <Ionicons name="add" size={32} color="#fff" />
@@ -61,7 +66,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* BILLS */}
+      {/* 4. BILLS */}
       <Tabs.Screen
         name="bills"
         options={{
@@ -72,7 +77,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* DASHBOARD */}
+      {/* 5. DASHBOARD */}
       <Tabs.Screen
         name="dashboard"
         options={{
@@ -84,7 +89,18 @@ export default function TabLayout() {
       />
 
       {/* 🔒 HIDE INTERNAL ROUTES */}
+      
+      {/* Existing Hidden Route */}
       <Tabs.Screen name="menu/[categoryId]" options={{ href: null }} />
+
+      {/* ✅ NEW ADDITION: Hide Bill Preview from Tab Bar */}
+      <Tabs.Screen 
+        name="bill-preview" 
+        options={{ 
+          href: null, // Removes icon from bottom bar
+          tabBarStyle: { display: "none" } // Optional: Hides tab bar when on this screen
+        }} 
+      />
+
     </Tabs>
-  );
-}
+  )};
