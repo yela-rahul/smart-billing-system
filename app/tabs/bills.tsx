@@ -4,13 +4,12 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { db } from "../../firebase/firebaseConfig";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { getUserId } from "../../utils/authStore";
 
 /* ---------------- TYPES ---------------- */
@@ -18,7 +17,7 @@ type Bill = {
   id: string;
   billNo?: string;
   grandTotal?: number;
-  total?: number; // fallback for old bills
+  total?: number;
   totalQty?: number;
   paymentMode?: "Cash" | "Online";
   date?: string;
@@ -29,38 +28,38 @@ export default function Bills() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
 
-  /* ---------------- LOAD DATA ---------------- */
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
     const startListening = async () => {
       const uid = await getUserId();
+
       if (!uid) {
         setLoading(false);
         return;
       }
 
-      // 1. Get reference to bills
       const billsRef = collection(db, "users", uid, "bills");
 
-      // 2. FETCH EVERYTHING (No 'orderBy' here to avoid errors)
-      unsubscribe = onSnapshot(billsRef, (snapshot) => {
-        const rawList = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as any),
-        }));
+      // ✅ ORDER BY DATE (Newest first)
+      const q = query(billsRef, orderBy("date", "desc"));
 
-        // 3. SORT MANUALLY IN THE APP (Safest way)
-        // This puts the newest bills at the top
-        const sortedList = rawList.sort((a: any, b: any) => {
-          const dateA = new Date(a.date || 0).getTime();
-          const dateB = new Date(b.date || 0).getTime();
-          return dateB - dateA;
-        });
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const list = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...(doc.data() as any),
+          }));
 
-        setBills(sortedList);
-        setLoading(false);
-      });
+          setBills(list);
+          setLoading(false);
+        },
+        (error) => {
+          console.log("Bills snapshot error:", error);
+          setLoading(false);
+        }
+      );
     };
 
     startListening();
@@ -70,51 +69,67 @@ export default function Bills() {
     };
   }, []);
 
-  /* ---------------- FORMAT HELPER ---------------- */
   const formatDate = (isoString?: string) => {
     if (!isoString) return { date: "No Date", time: "--" };
-    try {
-      const d = new Date(isoString);
-      return {
-        date: d.toLocaleDateString("en-IN", { day: '2-digit', month: 'short' }),
-        time: d.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })
-      };
-    } catch (e) {
-      return { date: "Error", time: "--" };
-    }
+
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return { date: "Invalid", time: "--" };
+
+    return {
+      date: d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+      time: d.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
   };
 
-  /* ---------------- RENDER ITEM ---------------- */
   const renderBill = ({ item }: { item: Bill }) => {
     const { date, time } = formatDate(item.date);
     const isOnline = item.paymentMode === "Online";
-    // Handle old bills that might use 'total' instead of 'grandTotal'
-    const displayAmount = item.grandTotal || item.total || 0;
+
+    const displayAmount = item.grandTotal ?? item.total ?? 0;
     const displayBillNo = item.billNo || "---";
 
     return (
       <View style={styles.card}>
-        {/* LEFT: ICON & INFO */}
         <View style={styles.leftSection}>
-          <View style={[styles.iconBox, isOnline ? styles.iconOnline : styles.iconCash]}>
-            <Ionicons 
-              name={isOnline ? "qr-code" : "cash"} 
-              size={20} 
-              color={isOnline ? "#2563EB" : "#16A34A"} 
+          <View
+            style={[
+              styles.iconBox,
+              isOnline ? styles.iconOnline : styles.iconCash,
+            ]}
+          >
+            <Ionicons
+              name={isOnline ? "qr-code" : "cash"}
+              size={20}
+              color={isOnline ? "#2563EB" : "#16A34A"}
             />
           </View>
-          
+
           <View>
             <Text style={styles.billTitle}>Bill #{displayBillNo}</Text>
             <Text style={styles.meta}>
               {date} • {time}
             </Text>
+
             <View style={styles.badgeRow}>
-              <View style={[styles.badge, isOnline ? styles.badgeOnline : styles.badgeCash]}>
-                <Text style={[styles.badgeText, isOnline ? styles.textOnline : styles.textCash]}>
+              <View
+                style={[
+                  styles.badge,
+                  isOnline ? styles.badgeOnline : styles.badgeCash,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.badgeText,
+                    isOnline ? styles.textOnline : styles.textCash,
+                  ]}
+                >
                   {item.paymentMode || "Cash"}
                 </Text>
               </View>
+
               {item.totalQty ? (
                 <Text style={styles.itemCount}>{item.totalQty} Items</Text>
               ) : null}
@@ -122,7 +137,6 @@ export default function Bills() {
           </View>
         </View>
 
-        {/* RIGHT: AMOUNT */}
         <View style={styles.right}>
           <Text style={styles.amount}>₹{displayAmount}</Text>
         </View>
@@ -133,18 +147,16 @@ export default function Bills() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.container}>
-        {/* HEADER */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>History</Text>
           <View style={styles.headerRight}>
-             <Text style={styles.totalBills}>{bills.length} Bills</Text>
+            <Text style={styles.totalBills}>{bills.length} Bills</Text>
           </View>
         </View>
 
-        {/* LIST */}
         {loading ? (
           <View style={styles.center}>
-             <ActivityIndicator size="large" color="#2563EB" />
+            <ActivityIndicator size="large" color="#2563EB" />
           </View>
         ) : bills.length === 0 ? (
           <View style={styles.center}>
@@ -165,10 +177,10 @@ export default function Bills() {
   );
 }
 
-/* ---------------- STYLES ---------------- */
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   container: { flex: 1 },
+
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -187,9 +199,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   totalBills: { fontSize: 12, fontWeight: "600", color: "#64748B" },
-  
+
   listContent: { padding: 16, paddingBottom: 100 },
-  
+
   card: {
     backgroundColor: "#fff",
     marginBottom: 12,
@@ -206,9 +218,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#F1F5F9",
   },
-  
+
   leftSection: { flexDirection: "row", alignItems: "center", gap: 14 },
-  
+
   iconBox: {
     width: 44,
     height: 44,
@@ -221,17 +233,18 @@ const styles = StyleSheet.create({
 
   billTitle: { fontSize: 16, fontWeight: "700", color: "#0F172A" },
   meta: { marginTop: 2, color: "#64748B", fontSize: 12, fontWeight: "500" },
-  
+
   badgeRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   badgeOnline: { backgroundColor: "#DBEAFE" },
   badgeCash: { backgroundColor: "#DCFCE7" },
-  
+
   badgeText: { fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
   textOnline: { color: "#1E40AF" },
   textCash: { color: "#166534" },
-  
+
   itemCount: { fontSize: 12, color: "#94A3B8" },
+
   right: { alignItems: "flex-end" },
   amount: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
 
