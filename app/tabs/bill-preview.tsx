@@ -1,19 +1,19 @@
-import React, { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  SafeAreaView,
-  Alert,
-  ActivityIndicator
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
-import { getUserId } from "../../utils/authStore";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { collection, doc, getDoc, runTransaction } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
 import { db } from "../../firebase/firebaseConfig";
-import { doc, getDoc, runTransaction, collection } from "firebase/firestore";
+import { getUserId } from "../../utils/authStore";
 
 /* ---------------- TYPES ---------------- */
 type CartItem = { id: string; name: string; price: number; quantity: number; };
@@ -106,50 +106,71 @@ export default function BillPreview() {
       if (!uid) return;
 
       const todayString = new Date().toDateString();
-      const counterRef = doc(db, "users", uid, "metadata", "counters");
-      const billsRef = collection(db, "users", uid, "bills");
+      const counterRef  = doc(db, "users", uid, "metadata", "counters");
+      const statsRef    = doc(db, "users", uid, "metadata", "dailyStats");
+      const billsRef    = collection(db, "users", uid, "bills");
 
       await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
-        
-        let newBillNo = 1;
+        const statsDoc   = await transaction.get(statsRef);
+
+        // ── Bill / token counters ──
+        let newBillNo  = 1;
         let newTokenNo = 1;
 
         if (counterDoc.exists()) {
-          const data = counterDoc.data();
-          const currentBill = Number(data.totalBills) || 0;
-          const currentToken = Number(data.dailyToken) || 0;
-          const lastDate = data.lastBillDate;
+          const data         = counterDoc.data();
+          const currentBill  = Number(data.totalBills)  || 0;
+          const currentToken = Number(data.dailyToken)  || 0;
+          const lastDate     = data.lastBillDate;
 
           newBillNo = currentBill + 1;
-
-          if (lastDate === todayString) {
-            newTokenNo = currentToken + 1;
-          } else {
-            newTokenNo = 1; 
-          }
+          newTokenNo = lastDate === todayString ? currentToken + 1 : 1;
         }
 
+        // ── Daily stats: reset if it's a new day ──
+        let prevRevenue  = 0;
+        let prevOrders   = 0;
+        let prevItems    = 0;
+
+        if (statsDoc.exists()) {
+          const sd = statsDoc.data();
+          if (sd.date === todayString) {
+            prevRevenue = Number(sd.totalRevenue) || 0;
+            prevOrders  = Number(sd.totalOrders)  || 0;
+            prevItems   = Number(sd.itemsSold)    || 0;
+          }
+          // if date differs, we start fresh (zeros above)
+        }
+
+        const statsUpdate = {
+          date:         todayString,
+          totalRevenue: prevRevenue + grandTotal,
+          totalOrders:  prevOrders  + 1,
+          itemsSold:    prevItems   + totalQty,
+        };
+
         const billData = {
-          billNo: newBillNo.toString(),
-          tokenNo: newTokenNo.toString(),
-          items: items,
-          grandTotal: grandTotal,
+          billNo:      newBillNo.toString(),
+          tokenNo:     newTokenNo.toString(),
+          items:       items,
+          grandTotal:  grandTotal,
           paymentMode: paymentMode,
-          totalQty: totalQty,
-          date: new Date().toISOString(),
-          shopName: shopName,
+          totalQty:    totalQty,
+          date:        new Date().toISOString(),
+          shopName:    shopName,
         };
 
         const counterUpdate = {
-          totalBills: newBillNo,
-          dailyToken: newTokenNo,
-          lastBillDate: todayString
+          totalBills:  newBillNo,
+          dailyToken:  newTokenNo,
+          lastBillDate: todayString,
         };
 
-        const newBillRef = doc(billsRef); 
+        const newBillRef = doc(billsRef);
         transaction.set(newBillRef, billData);
         transaction.set(counterRef, counterUpdate, { merge: true });
+        transaction.set(statsRef,   statsUpdate,   { merge: false }); // full overwrite — date-keyed
       });
 
       router.replace({ pathname: "/tabs/new-bill", params: { clear: "true" } });
@@ -166,7 +187,15 @@ export default function BillPreview() {
       
       {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() =>
+            router.replace({
+              pathname: "/tabs/new-bill",
+              params: { restoreCart: params.cart as string },
+            })
+          }
+          style={styles.backBtn}
+        >
           <Ionicons name="arrow-back" size={24} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Review Bill</Text>
@@ -416,4 +445,4 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   confirmText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-});
+}); 

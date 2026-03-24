@@ -1,4 +1,3 @@
-// app/auth/login.tsx
 import React, { useState } from "react";
 import {
   View,
@@ -103,14 +102,17 @@ export default function Login() {
       {/* Form Card */}
       <View style={styles.contentWrap}>
         <View style={authStyles.card}>
-          <Image
-            source={require("../../assets/images/logo_small.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-
-          <Text style={styles.title}>Welcome back!</Text>
-          <Text style={styles.subtitle}>Login to continue</Text>
+          
+          {/* ✅ LOGO & TITLE SECTION (Centrally Aligned) */}
+          <View style={styles.headerTextSection}>
+            <Image
+              source={require("../../assets/images/logo_small.png")}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.title}>Welcome back!</Text>
+            <Text style={styles.subtitle}>Login to continue</Text>
+          </View>
 
           {/* PHONE */}
           <Text style={authStyles.label}>Phone Number</Text>
@@ -156,7 +158,7 @@ export default function Login() {
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           {/* LOGIN BUTTON */}
-          <TouchableOpacity onPress={handleLogin} disabled={loading}>
+          <TouchableOpacity onPress={handleLogin} disabled={loading} style={{ marginTop: 20 }}>
             <LinearGradient
               colors={["#3B82F6", "#9333EA"]}
               style={authStyles.button}
@@ -172,7 +174,7 @@ export default function Login() {
           {/* SIGNUP LINK */}
           <TouchableOpacity
             onPress={() => router.push("/auth/signup")}
-            style={{ marginTop: 12, alignSelf: "center" }}
+            style={{ marginTop: 20, alignSelf: "center" }}
           >
             <Text style={styles.linkText}>Create new shop account</Text>
           </TouchableOpacity>
@@ -182,7 +184,7 @@ export default function Login() {
   );
 }
 
-// ONLY local styles here
+// Local styles updated for larger, centered logo
 const styles = StyleSheet.create({
   headerContainer: { height: 260, overflow: "hidden" },
 
@@ -209,36 +211,46 @@ const styles = StyleSheet.create({
     marginTop: -80,
   },
 
-  logo: {
-    width: 42,
-    height: 42,
-    position: "absolute",
-    top: 14,
-    left: 14,
+  // ✅ NEW: Container to centrally align logo and text
+  headerTextSection: {
+    alignItems: 'center', // Centrally aligns logo and text
+    marginBottom: 20,
+    width: '100%',
   },
 
+  // ✅ UPDATED: Larger size, centered, no longer absolute
+  logo: {
+    width: 80, // Increased from 42
+    height: 80, // Increased from 42
+    marginBottom: 10,
+  },
+
+  // ✅ UPDATED: Centered title
   title: {
     fontSize: 28,
     color: "#0f1724",
     fontWeight: "700",
-    marginLeft: 68,
+    textAlign: 'center', // Center the text
   },
 
+  // ✅ UPDATED: Centered subtitle
   subtitle: {
     marginTop: 6,
-    marginLeft: 68,
     color: "#6b7280",
+    textAlign: 'center', // Center the text
   },
 
   linkText: {
     color: "#3B82F6",
     textDecorationLine: "underline",
     fontWeight: "600",
+    fontSize: 14,
   },
 
   errorText: {
     color: "#db2777",
     marginTop: 6,
     fontSize: 13,
+    textAlign: 'center', // Center error text
   },
 });

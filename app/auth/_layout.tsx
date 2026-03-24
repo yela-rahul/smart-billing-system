@@ -15,7 +15,7 @@ export default function AuthLayout() {
 
         if (loggedIn) {
           // Already logged in → send to home screen
-          router.replace("/home");
+          router.replace("/tabs/home");
         } else {
           // Not logged in → show login/signup normally
           setChecking(false);

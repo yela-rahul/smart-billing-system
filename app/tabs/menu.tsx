@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { useRouter } from "expo-router";
@@ -106,7 +107,7 @@ export default function Menu() {
 
   /* ---------- UI ---------- */
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.title}>Menu</Text>
@@ -181,7 +182,7 @@ export default function Menu() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 

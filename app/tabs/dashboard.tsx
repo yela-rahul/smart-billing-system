@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { db } from "../../firebase/firebaseConfig";
 import { getUserId } from "../../utils/authStore";
 import { LineChart, BarChart, PieChart } from "react-native-chart-kit";
@@ -73,16 +73,38 @@ const CHART_CONFIG = {
 ============================================================ */
 export default function Dashboard() {
   const [allBills, setAllBills] = useState<Bill[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<FilterType>("This Week");
+  const [loading, setLoading]   = useState(true);
+  const [filter, setFilter]     = useState<FilterType>("This Week");
 
-  const fetchBills = async () => {
+  // Track when we last fetched — avoid re-fetching on every tab switch
+  const lastFetchedAt = React.useRef<number | null>(null);
+  const STALE_MS = 5 * 60 * 1000; // 5 minutes — re-fetch only if data is older than this
+
+  const fetchBills = async (force = false) => {
+    // Skip fetch if data is fresh and not forced
+    const now = Date.now();
+    if (!force && lastFetchedAt.current && (now - lastFetchedAt.current) < STALE_MS) {
+      return; // Data is still fresh — no Firestore call needed
+    }
+
     try {
       setLoading(true);
       const uid = await getUserId();
       if (!uid) return;
-      const snap = await getDocs(query(collection(db, "users", uid, "bills"), orderBy("date", "desc")));
+
+      // Only fetch last 31 days — covers Today, This Week, This Month
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setDate(oneMonthAgo.getDate() - 31);
+
+      const snap = await getDocs(
+        query(
+          collection(db, "users", uid, "bills"),
+          where("date", ">=", oneMonthAgo.toISOString()),
+          orderBy("date", "desc")
+        )
+      );
       setAllBills(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Bill[]);
+      lastFetchedAt.current = Date.now(); // stamp the fetch time
     } catch (e) {
       console.error("Dashboard:", e);
     } finally {
@@ -90,6 +112,7 @@ export default function Dashboard() {
     }
   };
 
+  // On tab focus — only fetch if data is stale (not on every single tab switch)
   useFocusEffect(useCallback(() => { fetchBills(); }, []));
 
   // ── Derived Data & Logic ──
@@ -146,7 +169,7 @@ export default function Dashboard() {
       {/* HEADER */}
       <View style={s.header}>
         <View><Text style={s.headerTitle}>Analytics</Text><Text style={s.headerSub}>Business Intelligence Suite</Text></View>
-        <TouchableOpacity style={s.headerIconBox} onPress={fetchBills}><Ionicons name="refresh" size={20} color="#2563EB" /></TouchableOpacity>
+        <TouchableOpacity style={s.headerIconBox} onPress={() => fetchBills(true)}><Ionicons name="refresh" size={20} color="#2563EB" /></TouchableOpacity>
       </View>
 
       {/* FILTER TABS */}

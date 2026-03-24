@@ -1,21 +1,21 @@
-import React, { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  ActivityIndicator,
-  RefreshControl,
-  Dimensions,
-  StatusBar
-} from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import { useRouter, useFocusEffect } from "expo-router";
-import { getUserId } from "../../utils/authStore";
+import { useFocusEffect, useRouter } from "expo-router";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
+  ActivityIndicator,
+  Dimensions,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
 import { db } from "../../firebase/firebaseConfig";
-import { collection, getDocs, query, orderBy, doc, getDoc } from "firebase/firestore";
+import { getUserId } from "../../utils/authStore";
 
 const { width } = Dimensions.get("window");
 
@@ -60,47 +60,42 @@ export default function HomeScreen() {
       const uid = await getUserId();
       if (!uid) return;
 
-      // 1. Get Shop Name
+      // 1. Get Shop Name — single doc read
       const userDoc = await getDoc(doc(db, "users", uid));
       if (userDoc.exists()) {
         const userData = userDoc.data();
         setUserName(userData.shopName || userData.name || "Shop Owner");
       }
 
-      // 2. Get Bills
-      const q = query(collection(db, "users", uid, "bills"), orderBy("date", "desc"));
-      const querySnapshot = await getDocs(q);
-
+      // 2. Read pre-computed daily stats — 1 document instead of all bills
       const todayString = new Date().toDateString();
-      
-      let revenue = 0;
-      let orders = 0;
-      let items = 0;
-      
-      const allBills: BillItem[] = [];
+      const statsDoc = await getDoc(doc(db, "users", uid, "metadata", "dailyStats"));
 
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        const billDate = new Date(data.date).toDateString();
-        
-        allBills.push({ id: doc.id, ...data } as BillItem);
+      if (statsDoc.exists() && statsDoc.data().date === todayString) {
+        // Stats document is from today — use it directly
+        const sd = statsDoc.data();
+        setStats({
+          totalRevenue: Number(sd.totalRevenue) || 0,
+          totalOrders:  Number(sd.totalOrders)  || 0,
+          itemsSold:    Number(sd.itemsSold)    || 0,
+        });
+      } else {
+        // No stats yet today (no bills created today) — show zeros
+        setStats({ totalRevenue: 0, totalOrders: 0, itemsSold: 0 });
+      }
 
-        // Calculate Today's Stats
-        if (billDate === todayString) {
-          revenue += Number(data.grandTotal || 0);
-          orders += 1;
-          items += Number(data.totalQty || 0);
-        }
-      });
-
-      // 3. Update State
-      setStats({
-        totalRevenue: revenue,
-        totalOrders: orders,
-        itemsSold: items,
-      });
-      
-      setRecentBills(allBills.slice(0, 3));
+      // 3. Fetch only the 3 most recent bills for the Recent Bills list
+      const recentQ = query(
+        collection(db, "users", uid, "bills"),
+        orderBy("date", "desc"),
+        limit(3)
+      );
+      const recentSnap = await getDocs(recentQ);
+      const recentList: BillItem[] = recentSnap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }));
+      setRecentBills(recentList);
 
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
