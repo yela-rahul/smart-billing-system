@@ -1,19 +1,25 @@
-import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, runTransaction } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
+  StyleSheet,
   TouchableOpacity,
-  View
+  ScrollView,
+  SafeAreaView,
+  Alert,
+  ActivityIndicator,
+  Modal,
 } from "react-native";
-import { db } from "../../firebase/firebaseConfig";
+import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { getUserId } from "../../utils/authStore";
+import { db } from "../../firebase/firebaseConfig";
+import { doc, getDoc, runTransaction, collection } from "firebase/firestore";
+import {
+  connectAndPrint,
+  PrintStatus,
+} from "../../utils/bluetoothPrinter";
+import { getSavedPrinter } from "../printer-settings";
 
 /* ---------------- TYPES ---------------- */
 type CartItem = { id: string; name: string; price: number; quantity: number; };
@@ -26,10 +32,13 @@ export default function BillPreview() {
   const [shopName, setShopName] = useState("Your Shop Name");
   const [loading, setLoading] = useState(false);
   const [calculating, setCalculating] = useState(true);
-  
   const [paymentMode, setPaymentMode] = useState<"Cash" | "Online">("Cash");
   const [previewBillNo, setPreviewBillNo] = useState<number>(1);
   const [previewTokenNo, setPreviewTokenNo] = useState<number>(1);
+
+  // Print status modal
+  const [printStatus, setPrintStatus]   = useState<PrintStatus>("idle");
+  const [printMessage, setPrintMessage] = useState("");
 
   const cart: Cart = params.cart ? JSON.parse(params.cart as string) : {};
   const items = Object.values(cart);
@@ -96,7 +105,7 @@ export default function BillPreview() {
     }, [])
   );
 
-  /* ---------------- 2. SAVE TRANSACTION ---------------- */
+  /* ---------------- 2. SAVE + PRINT ----------------  */
   const handleConfirm = async () => {
     if (items.length === 0) return;
     setLoading(true);
@@ -110,11 +119,13 @@ export default function BillPreview() {
       const statsRef    = doc(db, "users", uid, "metadata", "dailyStats");
       const billsRef    = collection(db, "users", uid, "bills");
 
+      let savedBillNo  = 1;
+      let savedTokenNo = 1;
+
       await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
         const statsDoc   = await transaction.get(statsRef);
 
-        // ── Bill / token counters ──
         let newBillNo  = 1;
         let newTokenNo = 1;
 
@@ -124,14 +135,13 @@ export default function BillPreview() {
           const currentToken = Number(data.dailyToken)  || 0;
           const lastDate     = data.lastBillDate;
 
-          newBillNo = currentBill + 1;
+          newBillNo  = currentBill + 1;
           newTokenNo = lastDate === todayString ? currentToken + 1 : 1;
         }
 
-        // ── Daily stats: reset if it's a new day ──
-        let prevRevenue  = 0;
-        let prevOrders   = 0;
-        let prevItems    = 0;
+        let prevRevenue = 0;
+        let prevOrders  = 0;
+        let prevItems   = 0;
 
         if (statsDoc.exists()) {
           const sd = statsDoc.data();
@@ -140,7 +150,6 @@ export default function BillPreview() {
             prevOrders  = Number(sd.totalOrders)  || 0;
             prevItems   = Number(sd.itemsSold)    || 0;
           }
-          // if date differs, we start fresh (zeros above)
         }
 
         const statsUpdate = {
@@ -162,21 +171,81 @@ export default function BillPreview() {
         };
 
         const counterUpdate = {
-          totalBills:  newBillNo,
-          dailyToken:  newTokenNo,
+          totalBills:   newBillNo,
+          dailyToken:   newTokenNo,
           lastBillDate: todayString,
         };
+
+        savedBillNo  = newBillNo;
+        savedTokenNo = newTokenNo;
 
         const newBillRef = doc(billsRef);
         transaction.set(newBillRef, billData);
         transaction.set(counterRef, counterUpdate, { merge: true });
-        transaction.set(statsRef,   statsUpdate,   { merge: false }); // full overwrite — date-keyed
+        transaction.set(statsRef,   statsUpdate,   { merge: false });
       });
 
-      router.replace({ pathname: "/tabs/new-bill", params: { clear: "true" } });
+      // ── Bill saved ✅ — now attempt Bluetooth print ──
+      const printer = await getSavedPrinter();
+
+      if (printer) {
+        // Show print status modal
+        setPrintStatus("connecting");
+        setPrintMessage("Connecting to printer...");
+
+        try {
+          await connectAndPrint(
+            printer.address,
+            {
+              shopName:    shopName,
+              billNo:      savedBillNo.toString(),
+              tokenNo:     savedTokenNo.toString(),
+              date:        new Date().toISOString(),
+              items:       items.map((i) => ({
+                name:     i.name,
+                price:    i.price,
+                quantity: i.quantity,
+              })),
+              subTotal:    subTotal,
+              grandTotal:  grandTotal,
+              roundOff:    grandTotal - subTotal,
+              totalQty:    totalQty,
+              paymentMode: paymentMode,
+            },
+            (status, message) => {
+              setPrintStatus(status);
+              setPrintMessage(message || "");
+            }
+          );
+
+          // Small delay to show success, then navigate
+          setTimeout(() => {
+            setPrintStatus("idle");
+            router.replace({ pathname: "/tabs/new-bill", params: { clear: "true" } });
+          }, 1500);
+
+        } catch (printError: any) {
+          // Print failed — but bill is already saved, so just warn
+          setPrintStatus("idle");
+          Alert.alert(
+            "Bill Saved ✅",
+            "Bill was saved but printing failed.\n" + printError.message,
+            [
+              {
+                text: "OK",
+                onPress: () =>
+                  router.replace({ pathname: "/tabs/new-bill", params: { clear: "true" } }),
+              },
+            ]
+          );
+        }
+      } else {
+        // No printer saved — just save and go back
+        router.replace({ pathname: "/tabs/new-bill", params: { clear: "true" } });
+      }
 
     } catch (error: any) {
-      Alert.alert("Error", "Failed to generate bill.\n" + error.message);
+      Alert.alert("Error", "Failed to save bill.\n" + error.message);
     } finally {
       setLoading(false);
     }
@@ -187,15 +256,7 @@ export default function BillPreview() {
       
       {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() =>
-            router.replace({
-              pathname: "/tabs/new-bill",
-              params: { restoreCart: params.cart as string },
-            })
-          }
-          style={styles.backBtn}
-        >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Review Bill</Text>
@@ -316,13 +377,72 @@ export default function BillPreview() {
 
       {/* Action Button */}
       <View style={styles.footerAction}>
-        <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm} disabled={loading || calculating}>
-          <Text style={styles.confirmText}>
-             {loading ? "Printing..." : `Confirm & Print ₹${grandTotal}`}
-          </Text>
-          {!loading && <Ionicons name="print-outline" size={20} color="#fff" />}
+        <TouchableOpacity
+          style={styles.confirmBtn}
+          onPress={handleConfirm}
+          disabled={loading || calculating}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="print-outline" size={20} color="#fff" />
+              <Text style={styles.confirmText}>
+                Confirm & Print ₹{grandTotal}
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* ── Print Status Modal ── */}
+      <Modal visible={printStatus !== "idle"} transparent animationType="fade">
+        <View style={styles.printModalBackdrop}>
+          <View style={styles.printModalBox}>
+
+            {/* Icon based on status */}
+            {printStatus === "connecting" && (
+              <View style={styles.printIconWrap}>
+                <Ionicons name="bluetooth" size={28} color="#2563EB" />
+              </View>
+            )}
+            {printStatus === "printing" && (
+              <View style={styles.printIconWrap}>
+                <Ionicons name="print-outline" size={28} color="#2563EB" />
+              </View>
+            )}
+            {printStatus === "success" && (
+              <View style={[styles.printIconWrap, styles.printIconSuccess]}>
+                <Ionicons name="checkmark-circle" size={28} color="#16A34A" />
+              </View>
+            )}
+            {printStatus === "error" && (
+              <View style={[styles.printIconWrap, styles.printIconError]}>
+                <Ionicons name="alert-circle" size={28} color="#EF4444" />
+              </View>
+            )}
+
+            {/* Spinner for connecting/printing */}
+            {(printStatus === "connecting" || printStatus === "printing") && (
+              <ActivityIndicator
+                size="large"
+                color="#2563EB"
+                style={{ marginVertical: 12 }}
+              />
+            )}
+
+            <Text style={styles.printModalTitle}>
+              {printStatus === "connecting" && "Connecting..."}
+              {printStatus === "printing"   && "Printing..."}
+              {printStatus === "success"    && "Printed!"}
+              {printStatus === "error"      && "Print Failed"}
+            </Text>
+
+            <Text style={styles.printModalMessage}>{printMessage}</Text>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -432,17 +552,62 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     backgroundColor: "#2563EB",
-    padding: 16,
-    borderRadius: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    shadowColor: "#2563EB",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    padding:         16,
+    borderRadius:    16,
+    flexDirection:   "row",
+    alignItems:      "center",
+    justifyContent:  "center",
+    gap:             8,
+    shadowColor:     "#2563EB",
+    shadowOffset:    { width: 0, height: 4 },
+    shadowOpacity:   0.3,
+    shadowRadius:    8,
+    elevation:       4,
   },
   confirmText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-}); 
+
+  /* ── Print Status Modal ── */
+  printModalBackdrop: {
+    flex:            1,
+    backgroundColor: "rgba(15,23,42,0.6)",
+    justifyContent:  "center",
+    alignItems:      "center",
+    padding:         32,
+  },
+  printModalBox: {
+    backgroundColor: "#fff",
+    borderRadius:    20,
+    padding:         28,
+    alignItems:      "center",
+    width:           "100%",
+    shadowColor:     "#000",
+    shadowOffset:    { width: 0, height: 8 },
+    shadowOpacity:   0.15,
+    shadowRadius:    20,
+    elevation:       10,
+  },
+  printIconWrap: {
+    width:           64,
+    height:          64,
+    borderRadius:    32,
+    backgroundColor: "#EFF6FF",
+    alignItems:      "center",
+    justifyContent:  "center",
+    marginBottom:    4,
+  },
+  printIconSuccess: { backgroundColor: "#F0FDF4" },
+  printIconError:   { backgroundColor: "#FEF2F2" },
+  printModalTitle: {
+    fontSize:   18,
+    fontWeight: "700",
+    color:      "#0F172A",
+    marginTop:  8,
+  },
+  printModalMessage: {
+    fontSize:   13,
+    color:      "#64748B",
+    marginTop:  6,
+    textAlign:  "center",
+    lineHeight: 18,
+  },
+});
