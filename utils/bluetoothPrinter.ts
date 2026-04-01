@@ -49,10 +49,76 @@ export type PrintStatus =
 
 // ✅ FIXED: Correct way to detect Expo Go vs Dev Build
 import Constants from "expo-constants";
+import { PermissionsAndroid, Platform } from "react-native";
 const IS_EXPO_GO = Constants.appOwnership === "expo";
 
 // Paper width for 58mm printer = 32 characters
 const PAPER_WIDTH = 32;
+
+const ensureBluetoothPermissions = async (): Promise<void> => {
+  if (Platform.OS !== "android") {
+    return;
+  }
+
+  const permissions =
+    Platform.Version >= 31
+      ? [
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        ]
+      : [
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+        ];
+
+  const results = await PermissionsAndroid.requestMultiple(permissions);
+  const deniedPermissions = permissions.filter(
+    (permission) => results[permission] !== PermissionsAndroid.RESULTS.GRANTED
+  );
+
+  if (deniedPermissions.length > 0) {
+    throw new Error(
+      "Bluetooth permission is required to scan printers. Please allow Nearby devices/Bluetooth permission in Android settings."
+    );
+  }
+};
+
+const normalizeDevices = (devices: any[] = []): PrinterDevice[] => {
+  const uniqueDevices = new Map<string, PrinterDevice>();
+
+  devices.forEach((device) => {
+    if (!device?.address || uniqueDevices.has(device.address)) {
+      return;
+    }
+
+    uniqueDevices.set(device.address, {
+      name: device.name || "Unknown Printer",
+      address: device.address,
+    });
+  });
+
+  return Array.from(uniqueDevices.values());
+};
+
+const parsePairedDevices = (devices: any): PrinterDevice[] => {
+  if (!Array.isArray(devices)) {
+    return [];
+  }
+
+  const parsed = devices.map((device) => {
+    if (typeof device === "string") {
+      try {
+        return JSON.parse(device);
+      } catch {
+        return null;
+      }
+    }
+
+    return device;
+  });
+
+  return normalizeDevices(parsed.filter(Boolean));
+};
 
 // ── Formatting Helpers ────────────────────────────────
 
@@ -168,20 +234,44 @@ export const scanForPrinters = async (): Promise<PrinterDevice[]> => {
     const { BluetoothManager } =
       require("react-native-bluetooth-escpos-printer") as typeof import("react-native-bluetooth-escpos-printer");
 
-    await BluetoothManager.enableBluetooth();
+    await ensureBluetoothPermissions();
 
-    const paired = await BluetoothManager.scanDevices();
-    const result = JSON.parse(paired);
+    const enabledResponse = await BluetoothManager.enableBluetooth();
+    const pairedDevices = parsePairedDevices(enabledResponse);
 
-    const devices: PrinterDevice[] = (result.paired || []).map((d: any) => ({
-      name:    d.name || "Unknown Printer",
-      address: d.address,
-    }));
-
-    return devices;
-  } catch (error) {
+    if (pairedDevices.length > 0) {
+      return pairedDevices;
+    }
+    throw new Error(
+      "No paired Bluetooth printers found. First pair the printer in Android Bluetooth settings, then try again."
+    );
+  } catch (error: any) {
     console.error("[BT] Scan error:", error);
-    throw new Error("Could not scan for printers. Make sure Bluetooth is on.");
+    const rawMessage =
+      typeof error?.message === "string"
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : JSON.stringify(error);
+    const message = rawMessage.toLowerCase();
+
+    if (
+      message.includes("permission") ||
+      message.includes("nearby") ||
+      message.includes("access_coarse_location")
+    ) {
+      throw new Error(
+        "Bluetooth permission was denied. Allow Nearby devices/Bluetooth permission and try again."
+      );
+    }
+
+    if (message.includes("bt not enabled") || message.includes("not enabled")) {
+      throw new Error("Bluetooth is turned off. Please turn it on and try again.");
+    }
+
+    throw new Error(
+      "Could not load paired printers. Make sure Bluetooth is on and the printer is already paired in Android Bluetooth settings."
+    );
   }
 };
 

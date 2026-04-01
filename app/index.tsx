@@ -40,6 +40,7 @@ function ReceiptLine({ delay, width: w, opacity }: { delay: number; width: numbe
 
 export default function Index() {
   const router = useRouter();
+  const hasNavigated = useRef(false);
 
   /* ── animation values ── */
   const logoScale   = useRef(new Animated.Value(0.3)).current;
@@ -56,6 +57,15 @@ export default function Index() {
   const dot3        = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
+    const safeReplace = (path: "/tabs/home" | "/auth/login") => {
+      if (hasNavigated.current) {
+        return;
+      }
+
+      hasNavigated.current = true;
+      router.replace(path);
+    };
+
     /* Logo pop-in */
     Animated.spring(logoScale, {
       toValue: 1, tension: 60, friction: 7, useNativeDriver: true,
@@ -106,20 +116,30 @@ export default function Index() {
     /* Auth check after animations settle */
     const timer = setTimeout(async () => {
       try {
-        const localLoggedIn = await isUserLoggedIn();
-        const firebaseUser  = auth.currentUser;
+        const localLoggedIn = await Promise.race<boolean>([
+          isUserLoggedIn(),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
+        ]);
+        const firebaseUser = auth.currentUser;
         if (localLoggedIn && firebaseUser) {
-          router.replace("/tabs/home");
+          safeReplace("/tabs/home");
         } else {
           await clearAuth();
-          router.replace("/auth/login");
+          safeReplace("/auth/login");
         }
       } catch {
-        router.replace("/auth/login");
+        safeReplace("/auth/login");
       }
     }, 2800);
 
-    return () => clearTimeout(timer);
+    const fallbackTimer = setTimeout(() => {
+      safeReplace("/auth/login");
+    }, 5000);
+
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(fallbackTimer);
+    };
   }, []);
 
   const shimmerX = shimmer.interpolate({ inputRange: [0, 1], outputRange: [-width, width] });
@@ -161,7 +181,7 @@ export default function Index() {
             pointerEvents="none"
           />
           <Image
-            source={require("../assets/images/logo.png")}
+            source={require("../assets/logo.png")}
             style={s.logo}
             resizeMode="cover"
           />

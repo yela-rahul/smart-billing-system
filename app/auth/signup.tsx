@@ -139,7 +139,7 @@ export default function Signup() {
           <View style={[authStyles.card, styles.customCard]}>
             <View style={styles.titleSection}>
                 <Image
-                source={require("../../assets/images/logo_small.png")}
+                source={require("../../assets/logo_small.png")}
                 style={styles.logo}
                 />
                 <View>

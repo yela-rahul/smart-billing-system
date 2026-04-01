@@ -1,0 +1,2 @@
+cd D:\project\smartbillingsystem\android
+.\gradlew.bat assembleDebug

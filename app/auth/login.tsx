@@ -106,7 +106,7 @@ export default function Login() {
           {/* ✅ LOGO & TITLE SECTION (Centrally Aligned) */}
           <View style={styles.headerTextSection}>
             <Image
-              source={require("../../assets/images/logo_small.png")}
+              source={require("../../assets/logo_small.png")}
               style={styles.logo}
               resizeMode="contain"
             />
